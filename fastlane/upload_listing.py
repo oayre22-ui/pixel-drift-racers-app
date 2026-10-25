@@ -144,7 +144,11 @@ def upload_shots(prefix, display_type):
     sets = api("GET", f"/v1/appStoreVersionLocalizations/{vloc['id']}/appScreenshotSets")["data"]
     sset = next((s for s in sets if s["attributes"]["screenshotDisplayType"] == display_type), None)
     if sset:
-        for old in api("GET", f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]:
+        existing = api("GET", f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]
+        if len(existing) == len(files):
+            print("      already has", len(files), "screenshots, skipping")
+            return
+        for old in existing:
             api("DELETE", f"/v1/appScreenshots/{old['id']}")
     else:
         sset = api("POST", "/v1/appScreenshotSets", {"data": {
@@ -155,18 +159,71 @@ def upload_shots(prefix, display_type):
         shot = api("POST", "/v1/appScreenshots", {"data": {
             "type": "appScreenshots", "attributes": {"fileName": f, "fileSize": len(blob)},
             "relationships": {"appScreenshotSet": {"data": {"type": "appScreenshotSets", "id": sset["id"]}}}}})["data"]
-        for op in shot["attributes"]["uploadOperations"]:
-            chunk = blob[op["offset"]:op["offset"] + op["length"]]
-            req = urllib.request.Request(op["url"], data=chunk, method=op["method"],
-                                         headers={h["name"]: h["value"] for h in op["requestHeaders"]})
-            urllib.request.urlopen(req).read()
+        put_file(shot, blob)
         api("PATCH", f"/v1/appScreenshots/{shot['id']}", {"data": {"type": "appScreenshots", "id": shot["id"],
             "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(blob).hexdigest()}}})
         print("      uploaded", f)
 
 
+def put_file(reserved, blob):
+    for op in reserved["attributes"]["uploadOperations"]:
+        chunk = blob[op["offset"]:op["offset"] + op["length"]]
+        req = urllib.request.Request(op["url"], data=chunk, method=op["method"],
+                                     headers={h["name"]: h["value"] for h in op["requestHeaders"]})
+        urllib.request.urlopen(req).read()
+
+
+# Cash Packs: each needs an en-US name/description and a review screenshot before it can go to review.
+CASH_PACKS = {
+    "pdr.cash.small": ("Pocket Change", "25,000 in-game cash"),
+    "pdr.cash.medium": ("Wad of Cash", "90,000 in-game cash"),
+    "pdr.cash.large": ("Briefcase", "175,000 in-game cash"),
+    "pdr.cash.huge": ("Armored Truck", "400,000 in-game cash"),
+    "pdr.cash.mega": ("Bank Vault", "1,000,000 in-game cash"),
+}
+IAP_SHOT = os.path.join(HERE, "iap-review-screenshot.png")
+
+
+def fill_iap(iap):
+    iap_id, product = iap["id"], iap["attributes"]["productId"]
+    name, desc = CASH_PACKS[product]
+    locs = api("GET", f"/v2/inAppPurchases/{iap_id}/inAppPurchaseLocalizations")["data"]
+    if not any(l["attributes"]["locale"] == LOCALE for l in locs):
+        api("POST", "/v1/inAppPurchaseLocalizations", {"data": {
+            "type": "inAppPurchaseLocalizations", "attributes": {"locale": LOCALE, "name": name, "description": desc},
+            "relationships": {"inAppPurchaseV2": {"data": {"type": "inAppPurchases", "id": iap_id}}}}})
+        print("      added name/description for", product)
+    try:
+        has_shot = api("GET", f"/v2/inAppPurchases/{iap_id}/appStoreReviewScreenshot").get("data")
+    except RuntimeError as e:
+        if "HTTP 404" not in str(e):
+            raise
+        has_shot = None
+    if not has_shot:
+        blob = open(IAP_SHOT, "rb").read()
+        shot = api("POST", "/v1/inAppPurchaseAppStoreReviewScreenshots", {"data": {
+            "type": "inAppPurchaseAppStoreReviewScreenshots",
+            "attributes": {"fileName": os.path.basename(IAP_SHOT), "fileSize": len(blob)},
+            "relationships": {"inAppPurchaseV2": {"data": {"type": "inAppPurchases", "id": iap_id}}}}})["data"]
+        put_file(shot, blob)
+        api("PATCH", f"/v1/inAppPurchaseAppStoreReviewScreenshots/{shot['id']}", {"data": {
+            "type": "inAppPurchaseAppStoreReviewScreenshots", "id": shot["id"],
+            "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(blob).hexdigest()}}})
+        print("      added review screenshot for", product)
+
+
+def fill_iaps():
+    iaps = [i for i in api("GET", f"/v1/apps/{app_id}/inAppPurchasesV2?limit=50")["data"]
+            if i["attributes"]["productId"] in CASH_PACKS]
+    if not iaps:
+        raise RuntimeError("No Cash Packs found on the app")
+    for iap in iaps:
+        step(f"Cash Pack {iap['attributes']['productId']}", lambda i=iap: fill_iap(i))
+
+
 for prefix, display_type in SLOTS.items():
     step(f"Screenshots {display_type}", lambda p=prefix, d=display_type: upload_shots(p, d))
+step("Cash Packs", fill_iaps)
 
 if errors:
     sys.exit("Failed: " + ", ".join(errors))
