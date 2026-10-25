@@ -1,0 +1,10 @@
+{
+  "appId": "com.pixeldriftracers.game",
+  "appName": "Pixel Drift Racers",
+  "webDir": "www",
+  "backgroundColor": "#0d0d1a",
+  "ios": { "contentInset": "never" },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
+}

@@ -1,0 +1,32 @@
+# Codemagic build for Pixel Drift Racers (iPhone).
+# This file must sit at the TOP of the repository, next to the app-store and drift-racers folders.
+workflows:
+  ios-release:
+    name: iOS App Store
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic   # the name of your App Store Connect API key in Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.pixeldriftracers.game
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Install
+        script: cd app-store && npm ci
+      - name: Build game and copy into app
+        script: cd app-store && node build.mjs && npx cap sync ios
+      - name: Set up signing
+        script: xcode-project use-profiles
+      - name: Set build number
+        script: cd app-store/ios/App && agvtool new-version -all $BUILD_NUMBER
+      - name: Build ipa
+        script: cd app-store/ios/App && xcode-project build-ipa --project App.xcodeproj --scheme App
+    artifacts:
+      - app-store/ios/App/build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

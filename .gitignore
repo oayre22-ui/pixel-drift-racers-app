@@ -1,0 +1,6 @@
+app-store/node_modules/
+app-store/ios/App/App/public/
+app-store/android/app/src/main/assets/public/
+app-store/ios/DerivedData/
+app-store/android/.gradle/
+app-store/android/app/build/
