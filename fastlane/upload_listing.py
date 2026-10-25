@@ -225,6 +225,62 @@ for prefix, display_type in SLOTS.items():
     step(f"Screenshots {display_type}", lambda p=prefix, d=display_type: upload_shots(p, d))
 step("Cash Packs", fill_iaps)
 
+
+# TestFlight: invite TESTER_EMAIL. A member of the App Store Connect team goes in an internal group (no review);
+# anyone else goes in an external group, which needs a quick Beta App Review of the build.
+TESTER_EMAIL = "c4flickan@gmail.com"
+
+
+def testflight():
+    builds = api("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=1")["data"]
+    if not builds:
+        raise RuntimeError("No build uploaded yet: run the iOS App Store workflow first")
+    build = builds[0]
+    print("      latest build", build["attributes"]["version"], "state", build["attributes"].get("processingState"))
+    if build["attributes"].get("usesNonExemptEncryption") is None:
+        api("PATCH", f"/v1/builds/{build['id']}", {"data": {"type": "builds", "id": build["id"],
+                                                             "attributes": {"usesNonExemptEncryption": False}}})
+        print("      answered export compliance (standard encryption only)")
+    team = {u["attributes"]["username"].lower(): u["attributes"] for u in api("GET", "/v1/users?limit=100")["data"]}
+    internal = TESTER_EMAIL.lower() in team
+    groups = api("GET", f"/v1/apps/{app_id}/betaGroups")["data"]
+    group = next((g for g in groups if bool(g["attributes"].get("isInternalGroup")) == internal), None)
+    if group is None:
+        attrs = {"name": "Team", "isInternalGroup": True, "hasAccessToAllBuilds": True} if internal else {"name": "Testers"}
+        group = api("POST", "/v1/betaGroups", {"data": {"type": "betaGroups", "attributes": attrs,
+            "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})["data"]
+        print("      created TestFlight group", attrs["name"])
+    if not group["attributes"].get("hasAccessToAllBuilds"):
+        api("POST", f"/v1/betaGroups/{group['id']}/relationships/builds", {"data": [{"type": "builds", "id": build["id"]}]})
+    testers = api("GET", f"/v1/betaGroups/{group['id']}/betaTesters?limit=200")["data"]
+    if TESTER_EMAIL.lower() not in {(t["attributes"].get("email") or "").lower() for t in testers}:
+        a = team.get(TESTER_EMAIL.lower(), {})
+        api("POST", "/v1/betaTesters", {"data": {"type": "betaTesters",
+            "attributes": {"email": TESTER_EMAIL, "firstName": a.get("firstName") or "", "lastName": a.get("lastName") or ""},
+            "relationships": {"betaGroups": {"data": [{"type": "betaGroups", "id": group["id"]}]}}}})
+    print("      invited", TESTER_EMAIL, "(internal)" if internal else "(external)")
+    if internal:
+        return
+    # External testing: the build needs "what to test" text, app beta info, then a Beta App Review.
+    if not api("GET", f"/v1/builds/{build['id']}/betaBuildLocalizations")["data"]:
+        api("POST", "/v1/betaBuildLocalizations", {"data": {"type": "betaBuildLocalizations",
+            "attributes": {"locale": LOCALE, "whatToTest": "Drift on the tracks, tune a car, and try a Cash Pack (sandbox, no real charge)."},
+            "relationships": {"build": {"data": {"type": "builds", "id": build["id"]}}}}})
+    if not api("GET", f"/v1/apps/{app_id}/betaAppLocalizations")["data"]:
+        api("POST", "/v1/betaAppLocalizations", {"data": {"type": "betaAppLocalizations",
+            "attributes": {"locale": LOCALE, "feedbackEmail": TESTER_EMAIL, "description": meta("promotional_text.txt")},
+            "relationships": {"app": {"data": {"type": "apps", "id": app_id}}}}})
+    state = api("GET", f"/v1/builds/{build['id']}/buildBetaDetail")["data"]["attributes"].get("externalBuildState")
+    if state in ("READY_FOR_BETA_SUBMISSION", "MISSING_EXPORT_COMPLIANCE", None):
+        api("POST", "/v1/betaAppReviewSubmissions", {"data": {"type": "betaAppReviewSubmissions",
+            "relationships": {"build": {"data": {"type": "builds", "id": build["id"]}}}}})
+        print("      sent build for Beta App Review (usually under a day)")
+    else:
+        print("      external testing state:", state)
+
+
+step("TestFlight", testflight)
+
 if errors:
     sys.exit("Failed: " + ", ".join(errors))
-print("All done. Nothing was submitted for review.")
+print("All done. The app itself was not submitted to App Review.")
