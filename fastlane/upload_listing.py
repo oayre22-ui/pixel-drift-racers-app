@@ -5,8 +5,9 @@ Reads fastlane/metadata and fastlane/screenshots, so it replaces `fastlane deliv
 setup on Codemagic rejects the key). Does NOT submit for review.
 Needs APP_STORE_CONNECT_KEY_IDENTIFIER, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_PRIVATE_KEY.
 """
-import hashlib, json, os, re, sys, textwrap, time, urllib.error, urllib.request
+import base64, hashlib, json, os, re, sys, textwrap, time, urllib.error, urllib.request
 import jwt  # PyJWT
+from cryptography.hazmat.primitives import serialization
 
 BUNDLE_ID = "com.pixeldriftracers.game"
 VERSION = "1.0"
@@ -25,13 +26,38 @@ errors = []
 
 
 def clean_pem(raw):
+    raw = raw.strip()
+    # Codemagic-style references: "@file:/path/AuthKey.p8" or "@env:VAR"
+    if raw.startswith("@file:"):
+        raw = open(os.path.expanduser(raw[6:]), encoding="utf-8").read()
+    elif raw.startswith("@env:"):
+        raw = os.environ[raw[5:]]
     raw = raw.replace("\\n", "\n")
+    if "BEGIN" not in raw:  # maybe the whole .p8 file was base64-encoded
+        try:
+            decoded = base64.b64decode(re.sub(r"\s", "", raw) + "===").decode("utf-8")
+            if "BEGIN" in decoded:
+                raw = decoded
+        except Exception:
+            pass
     body = re.sub(r"-----(BEGIN|END)[A-Z ]*-----", "", raw)
     body = re.sub(r"[^A-Za-z0-9+/=]", "", body)
     return "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 64)) + "\n-----END PRIVATE KEY-----\n"
 
 
-KEY = clean_pem(os.environ["APP_STORE_CONNECT_PRIVATE_KEY"])
+def describe_key(raw):
+    """Shape of the key value without revealing it."""
+    raw = raw.strip()
+    kind = "file reference" if raw.startswith("@file:") else "env reference" if raw.startswith("@env:") else \
+        "PEM" if "BEGIN" in raw else "no PEM header"
+    return f"{kind}, {len(raw)} chars, {raw.count(chr(10)) + 1} lines"
+
+
+RAW_KEY = os.environ["APP_STORE_CONNECT_PRIVATE_KEY"]
+print("Key value looks like:", describe_key(RAW_KEY))
+KEY = clean_pem(RAW_KEY)
+serialization.load_pem_private_key(KEY.encode(), password=None)  # fail early with a clear error
+print("Key loads OK")
 KEY_ID = os.environ["APP_STORE_CONNECT_KEY_IDENTIFIER"].strip()
 ISSUER = os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip()
 _token = [None, 0]
