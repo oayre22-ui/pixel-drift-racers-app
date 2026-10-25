@@ -30,3 +30,25 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+
+  # Uploads the App Store text and screenshots in fastlane/ to App Store Connect (does NOT submit).
+  store-listing:
+    name: Upload App Store listing
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
+    scripts:
+      - name: Update fastlane
+        script: gem install fastlane --no-document
+      - name: Upload text and screenshots
+        script: |
+          if [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ]; then echo "App Store Connect key not found. Check the integration name."; exit 1; fi
+          python3 - <<'PY'
+          import json, os
+          json.dump({"key_id": os.environ["APP_STORE_CONNECT_KEY_IDENTIFIER"], "issuer_id": os.environ["APP_STORE_CONNECT_ISSUER_ID"],
+                     "key": os.environ["APP_STORE_CONNECT_PRIVATE_KEY"], "in_house": False}, open("/tmp/asc_key.json", "w"))
+          PY
+          fastlane deliver --api_key_path /tmp/asc_key.json --app_identifier com.pixeldriftracers.game --platform ios \
+            --app_version 1.0 --skip_binary_upload true --overwrite_screenshots true --submit_for_review false \
+            --run_precheck_before_submit false --force true
