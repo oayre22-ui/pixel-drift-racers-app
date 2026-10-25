@@ -52,3 +52,13 @@ workflows:
           fastlane deliver --api_key_path /tmp/asc_key.json --app_identifier com.pixeldriftracers.game --platform ios \
             --app_version 1.0 --skip_binary_upload true --overwrite_screenshots true --submit_for_review false \
             --run_precheck_before_submit false --force true
+      - name: Set content rights (no third-party content)
+        script: |
+          cat > /tmp/content_rights.rb <<'RB'
+          require "spaceship"
+          Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(filepath: "/tmp/asc_key.json")
+          app = Spaceship::ConnectAPI::App.find("com.pixeldriftracers.game")
+          app.update(attributes: { content_rights_declaration: "DOES_NOT_USE_THIRD_PARTY_CONTENT" })
+          puts "Content rights set"
+          RB
+          ruby -e 'require "fastlane"; load "/tmp/content_rights.rb"'
