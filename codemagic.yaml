@@ -31,7 +31,8 @@ workflows:
         auth: integration
         submit_to_testflight: true
 
-  # Uploads the App Store text and screenshots in fastlane/ to App Store Connect (does NOT submit).
+  # Fills in the App Store listing (text, screenshots, privacy URL, copyright, content rights) for version 1.0.
+  # Does NOT submit for review. Script: fastlane/upload_listing.py (talks to the App Store Connect API directly).
   store-listing:
     name: Upload App Store listing
     max_build_duration: 30
@@ -39,35 +40,7 @@ workflows:
     integrations:
       app_store_connect: codemagic
     scripts:
-      - name: Update fastlane
-        script: gem install fastlane --no-document
-      - name: Upload text and screenshots
-        script: |
-          if [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ]; then echo "App Store Connect key not found. Check the integration name."; exit 1; fi
-          # Rebuild the .p8 key as clean PEM: the env var can arrive with literal "\n", CRLFs, spaces or on one line,
-          # and newer OpenSSL rejects that with "invalid curve name".
-          python3 - <<'PY'
-          import json, os, re, textwrap
-          raw = os.environ["APP_STORE_CONNECT_PRIVATE_KEY"].replace("\\n", "\n")
-          body = re.sub(r"-----(BEGIN|END)[A-Z ]*-----", "", raw)
-          body = re.sub(r"[^A-Za-z0-9+/=]", "", body)
-          pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 64)) + "\n-----END PRIVATE KEY-----\n"
-          open("/tmp/AuthKey.p8", "w").write(pem)
-          json.dump({"key_id": os.environ["APP_STORE_CONNECT_KEY_IDENTIFIER"].strip(), "issuer_id": os.environ["APP_STORE_CONNECT_ISSUER_ID"].strip(),
-                     "key": pem, "in_house": False}, open("/tmp/asc_key.json", "w"))
-          print("Key rebuilt:", len(body), "base64 chars")
-          PY
-          openssl pkey -in /tmp/AuthKey.p8 -noout && echo "Key parses OK"
-          fastlane deliver --api_key_path /tmp/asc_key.json --app_identifier com.pixeldriftracers.game --platform ios \
-            --app_version 1.0 --skip_binary_upload true --overwrite_screenshots true --submit_for_review false \
-            --run_precheck_before_submit false --force true
-      - name: Set content rights (no third-party content)
-        script: |
-          cat > /tmp/content_rights.rb <<'RB'
-          require "spaceship"
-          Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(filepath: "/tmp/asc_key.json")
-          app = Spaceship::ConnectAPI::App.find("com.pixeldriftracers.game")
-          app.update(attributes: { content_rights_declaration: "DOES_NOT_USE_THIRD_PARTY_CONTENT" })
-          puts "Content rights set"
-          RB
-          ruby -e 'require "fastlane"; load "/tmp/content_rights.rb"'
+      - name: Install Python packages
+        script: python3 -m pip install --user --quiet pyjwt cryptography || python3 -m pip install --user --quiet --break-system-packages pyjwt cryptography
+      - name: Upload listing to App Store Connect
+        script: python3 fastlane/upload_listing.py
