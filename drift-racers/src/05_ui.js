@@ -679,17 +679,36 @@ const UI = {
     $touch.classList.toggle('show', !!show); Game.touchUI = !!show;
     const hud = document.getElementById('hud'); if (hud) hud.classList.toggle('touchmode', !!show);
     const nos = document.getElementById('tb_nos'); if (nos && s && s.player) nos.style.display = s.player.spec.nos ? '' : 'none';
+
+    if (!show) releaseTouch();
   },
   buildTouch() {
     const B = [['left', '&#9664;', 'left:2vmin;bottom:5vmin;width:19vmin;height:24vmin'], ['right', '&#9654;', 'left:23vmin;bottom:5vmin;width:19vmin;height:24vmin'],
       ['gas', 'GAS', 'right:2vmin;bottom:5vmin;width:17vmin;height:34vmin'], ['brake', 'BRAKE', 'right:21vmin;bottom:5vmin;width:17vmin;height:15vmin'],
       ['hand', 'E-BRAKE', 'right:21vmin;bottom:23vmin;width:17vmin;height:16vmin;font-size:12px'], ['nos', 'NOS', 'right:2vmin;bottom:42vmin;width:17vmin;height:11vmin']];
     $touch.innerHTML = B.map(b => `<div class="tb" id="tb_${b[0]}" data-k="${b[0]}" style="${b[2]}">${b[1]}</div>`).join('');
-    for (const el of $touch.querySelectorAll('.tb')) {
-      const k = el.dataset.k, ids = new Set();
-      const upd = () => { TouchState[k] = ids.size ? 1 : 0; el.classList.toggle('on', ids.size > 0); };
-      el.addEventListener('pointerdown', e => { e.preventDefault(); ids.add(e.pointerId); try { el.setPointerCapture(e.pointerId); } catch (x) {} upd(); });
-      const off = e => { ids.delete(e.pointerId); upd(); };
+    // fingers: every touch event rebuilds the held set from e.touches, so a lost touchend can't leave a button stuck
+    const btns = [...$touch.querySelectorAll('.tb')], hit = (x, y) => {
+      for (const el of btns) { if (el.style.display === 'none') continue; const r = el.getBoundingClientRect(); if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el.dataset.k; }
+      return null;
+    };
+    const sync = e => {
+      e.preventDefault();
+      const live = new Set();
+      for (const t of e.touches) {
+        live.add(t.identifier);
+        const k = hit(t.clientX, t.clientY);
+        if (k) TouchFingers.set(t.identifier, k);
+      }
+      for (const id of [...TouchFingers.keys()]) if (!live.has(id)) TouchFingers.delete(id);
+      updTouch();
+    };
+    for (const ev of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) $touch.addEventListener(ev, sync, {passive: false});
+    // mouse/pen (touch buttons forced on in Settings)
+    for (const el of btns) {
+      const k = el.dataset.k;
+      el.addEventListener('pointerdown', e => { if (e.pointerType === 'touch') return; e.preventDefault(); TouchPointers.set(e.pointerId, k); try { el.setPointerCapture(e.pointerId); } catch (x) {} updTouch(); });
+      const off = e => { if (TouchPointers.delete(e.pointerId)) updTouch(); };
       el.addEventListener('pointerup', off); el.addEventListener('pointercancel', off); el.addEventListener('lostpointercapture', off);
       el.addEventListener('contextmenu', e => e.preventDefault());
     }
