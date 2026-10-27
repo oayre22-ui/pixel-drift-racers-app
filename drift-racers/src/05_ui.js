@@ -512,6 +512,7 @@ const UI = {
       ${tg('kick', true, false, 'Auto Drift Start', 'Steer hard on the gas at speed and the back kicks out, no handbrake needed.')}
       ${tg('speedHold', true, false, 'Speed Hold', 'Keeps your speed up through long drifts.')}
       ${tg('softWalls', true, false, 'Soft Walls', 'Bounce gently off walls without losing much speed or your combo.')}
+      ${tg('easyHandling', true, false, 'Easy Handling', 'Arcade grip: the car steers itself away from walls, won\'t snap-spin, and lifting off the gas straightens you out.')}
       ${tg('combo', true, false, 'Combo Saver', 'Longer time to link drifts, and gravel or light taps don\'t end your combo.')}
       ${ch('steerSpd', ['slow', 'normal', 'fast'], 'Steering Speed', 'How quickly the wheels turn when you steer.')}
       ${tg('sound', true, false, 'Sound', 'Engine, tyres and menu sounds.')}
