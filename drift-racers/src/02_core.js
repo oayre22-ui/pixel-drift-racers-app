@@ -99,7 +99,7 @@ function newCarState(id) {
 }
 function defaultSave() {
   return {cash: 2000, cars: {hachi: newCarState('hachi')}, current: 'hachi', best: {},
-    tutorialDone: false, usedSeed: 1, usedSold: [], settings: {sound: true, assist: true, touch: 'auto', units: 'kmh', cs: 'normal', hold: 'normal', spin: true, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal'}, stats: {races: 0, wins: 0, bestDrift: 0}};
+    tutorialDone: false, usedSeed: 1, usedSold: [], settings: {sound: true, assist: true, touch: 'auto', units: 'kmh', cs: 'normal', hold: 'normal', spin: true, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal', easyHandling: false}, stats: {races: 0, wins: 0, bestDrift: 0}};
 }
 let SAVE = defaultSave();
 function loadSave() {
@@ -108,6 +108,7 @@ function loadSave() {
     const s = JSON.parse(raw), d = defaultSave();
     SAVE = Object.assign(d, s); SAVE.settings = Object.assign(d.settings, s.settings || {});
     delete SAVE.settings.arcade; // Arcade Drift was tried and removed
+    if (s.settings && !('easyHandling' in s.settings)) SAVE.settings.easyHandling = !!(s.settings.cs === 'max' && s.settings.hold === 'strong' && s.settings.softWalls); // Max Easy players get Easy Handling too
     if (s.settings && s.settings.assist === false && !('cs' in s.settings)) { SAVE.settings.cs = 'off'; SAVE.settings.hold = 'off'; } // old saves SAVE.stats = Object.assign(d.stats, s.stats || {});
     for (const id in SAVE.cars) { // fill in any fields added in later versions
       if (!CAR_BY_ID[id]) { delete SAVE.cars[id]; continue; }
@@ -422,14 +423,14 @@ function usedStock() {
 
 // ===== drift assists (Settings) =====
 const ASSIST_PRESETS = {
-  easy: {cs: 'max', hold: 'strong', spin: true, kick: true, speedHold: true, softWalls: true, combo: true, steerSpd: 'normal'},
-  normal: {cs: 'normal', hold: 'normal', spin: true, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal'},
-  pro: {cs: 'off', hold: 'off', spin: false, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal'},
+  easy: {cs: 'max', hold: 'strong', spin: true, kick: true, speedHold: true, softWalls: true, combo: true, steerSpd: 'normal', easyHandling: true},
+  normal: {cs: 'normal', hold: 'normal', spin: true, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal', easyHandling: false},
+  pro: {cs: 'off', hold: 'off', spin: false, kick: false, speedHold: false, softWalls: false, combo: false, steerSpd: 'normal', easyHandling: false},
 };
 function driftAssists() {
   const st = SAVE.settings;
   return {cs: {off: 0, low: 0.5, normal: 1, max: 1.4}[st.cs] ?? 1, hold: {off: 0, normal: 1, strong: 1.8}[st.hold] ?? 1, spin: st.spin ? 1 : 0,
-    kick: st.kick ? 1 : 0, speed: st.speedHold ? 1 : 0, wall: st.softWalls ? 1 : 0, steer: {slow: 0.7, normal: 1, fast: 1.45}[st.steerSpd] ?? 1};
+    kick: st.kick ? 1 : 0, speed: st.speedHold ? 1 : 0, wall: st.softWalls ? 1 : 0, arc: st.easyHandling ? 1 : 0, steer: {slow: 0.7, normal: 1, fast: 1.45}[st.steerSpd] ?? 1};
 }
 
 // ===== damage & wear =====  every part has a condition (0-100%). Worn parts work worse (see buildSpec);
