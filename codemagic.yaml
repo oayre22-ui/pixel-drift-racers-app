@@ -31,7 +31,8 @@ workflows:
         auth: integration
         submit_to_testflight: true
 
-  # Uploads the App Store text and screenshots in fastlane/ to App Store Connect (does NOT submit).
+  # Fills in the App Store listing (text, screenshots, privacy URL, copyright, content rights) for version 1.0.
+  # Does NOT submit for review. Script: fastlane/upload_listing.py (talks to the App Store Connect API directly).
   store-listing:
     name: Upload App Store listing
     max_build_duration: 30
@@ -39,16 +40,7 @@ workflows:
     integrations:
       app_store_connect: codemagic
     scripts:
-      - name: Update fastlane
-        script: gem install fastlane --no-document
-      - name: Upload text and screenshots
-        script: |
-          if [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ]; then echo "App Store Connect key not found. Check the integration name."; exit 1; fi
-          python3 - <<'PY'
-          import json, os
-          json.dump({"key_id": os.environ["APP_STORE_CONNECT_KEY_IDENTIFIER"], "issuer_id": os.environ["APP_STORE_CONNECT_ISSUER_ID"],
-                     "key": os.environ["APP_STORE_CONNECT_PRIVATE_KEY"], "in_house": False}, open("/tmp/asc_key.json", "w"))
-          PY
-          fastlane deliver --api_key_path /tmp/asc_key.json --app_identifier com.pixeldriftracers.game --platform ios \
-            --app_version 1.0 --skip_binary_upload true --overwrite_screenshots true --submit_for_review false \
-            --run_precheck_before_submit false --force true
+      - name: Install Python packages
+        script: python3 -m pip install --user --quiet pyjwt cryptography || python3 -m pip install --user --quiet --break-system-packages pyjwt cryptography
+      - name: Upload listing to App Store Connect
+        script: python3 fastlane/upload_listing.py

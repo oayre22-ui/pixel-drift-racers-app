@@ -109,7 +109,7 @@ function makeShadow(spr) {
 let ASSIST_K = 0.9, STAB_K = 1.4, DRIFT_HOLD = 1.6;
 // front keeps more grip past the peak than the rear, so slides are catchable but self-sustaining
 // assist settings: a boolean (old style: countersteer + angle hold) or an object from driftAssists()
-function assistCfg(a) { if (a && typeof a === 'object') return a; return {cs: a ? 1 : 0, hold: a ? 1 : 0, spin: 0, kick: 0, speed: 0, wall: 0, steer: 1}; }
+function assistCfg(a) { if (a && typeof a === 'object') return a; return {cs: a ? 1 : 0, hold: a ? 1 : 0, spin: 0, kick: 0, speed: 0, wall: 0, arc: 0, steer: 1}; }
 function tyre(alpha, B, D, C) { return D * Math.sin(C * Math.atan(B * alpha)); }
 
 class CarSim {
@@ -136,7 +136,7 @@ class CarSim {
     // surface
     const n = track.nearest(this.x, this.y, this.idx, 12); this.idx = n.idx; this.lat = n.lat;
     this.surf = track.surface(n.lat);
-    const sg = this.surf === 2 ? 0.75 : this.surf === 1 ? 0.97 : 1;
+    const sg = this.surf === 2 ? (A.arc ? 0.92 : 0.75) : this.surf === 1 ? 0.97 : 1;
     // steering (speed-sensitive, rate limited) + optional countersteer assist
     const beta = speed > 2 ? Math.atan2(vl, Math.abs(vf)) : 0; this.beta = beta;
     // speed-sensitive steering while gripping; full lock available once sliding so you can countersteer
@@ -173,7 +173,7 @@ class CarSim {
     let Nf = m * G * sp.b / L - m * this.ax * sp.h / L; Nf = clamp(Nf, m * G * 0.15, m * G * 0.85);
     let Nr = m * G - Nf;
     Nf += sp.dfF * speed * speed; Nr += sp.dfR * speed * speed; // aero downforce
-    const muF = sp.muF * sg, muR = sp.muR * sg;
+    const muF = sp.muF * sg * (A.arc ? 1.15 : 1), muR = sp.muR * sg; // easy handling: sharper turn-in, easier to catch
     // braking
     let FbF = 0, FbR = 0;
     if (inp.brake > 0 && vf > 0.5) { FbF = inp.brake * sp.brake * sp.bias; FbR = inp.brake * sp.brake * (1 - sp.bias); }
@@ -206,7 +206,7 @@ class CarSim {
     let Tz = sp.a * FyF * Math.cos(d) - sp.b * FyR;
     // arcade stability: gentle weathervane while sliding, firm soft-limit past the car's max angle
     // (more steering lock = higher max angle, which is what the Angle Kit buys you)
-    const maxA = A.spin ? Math.min(sp.steerMax + 0.3, 1.1) : sp.steerMax + 0.3, excess = beta - clamp(beta, -maxA, maxA);
+    const maxA = A.arc ? Math.min(sp.steerMax + 0.15, 0.9) : A.spin ? Math.min(sp.steerMax + 0.3, 1.1) : sp.steerMax + 0.3, excess = beta - clamp(beta, -maxA, maxA);
     // drift hold (assist on): while sliding on the gas, ease off the straightening torque and nudge toward a
     // comfortable angle so the slide holds itself. Steering into the drift asks for more angle, countersteer for less.
     let stab = STAB_K;
@@ -216,7 +216,8 @@ class CarSim {
       stab *= 1 - Math.min(0.9, 0.7 * A.hold) * inp.throttle;
       Tz += sp.I * DRIFT_HOLD * A.hold * (want - beta) * -1 * inp.throttle * clamp((speed - 7) / 6, 0, 1);
     }
-    Tz += sp.I * (stab * beta + (A.spin ? 18 : 7) * excess) * clamp(speed / 10, 0, 1);
+    if (A.arc && inp.throttle < 0.3 && !hb) stab *= 2.2; // easy handling: lift off and the car straightens itself
+    Tz += sp.I * (stab * beta + (A.arc ? 30 : A.spin ? 18 : 7) * excess) * clamp(speed / 10, 0, 1);
     this.dbg = [FyF, FyR, DF, DR, FxR, Nf, aF, aR];
     let axl = Fx / m, ayl = Fy / m;
     // speed hold: keeps the car moving through long slides instead of scrubbing off all its speed
@@ -229,9 +230,25 @@ class CarSim {
     if (speed < 0.6 && inp.throttle < 0.05 && !reversing) { vf *= 0.9; vl *= 0.9; this.w *= 0.85; }
     this.vx = vf * c - vl * s; this.vy = vf * s + vl * c;
     this.th = wrapAng(this.th + this.w * dt);
+    if (A.arc) this.keepOnRoad(dt, track, n);
     this.x += this.vx * PPM * dt; this.y += this.vy * PPM * dt;
     this.thr = inp.throttle; this.hand = hb ? 1 : 0;
     this.collide(track, A);
+  }
+  // easy handling: near the edge of the road, gently turn the car (heading and travel together, so the
+  // drift angle is kept) back along the road and bleed off the speed heading into the barrier
+  keepOnRoad(dt, track, n) {
+    const edge = ROAD_W / 2 - 6, lim = ROAD_W / 2 + RUNOFF - 2, a = Math.abs(n.lat), speed = this.speed;
+    if (a < edge || speed < 4) return;
+    const sgn = Math.sign(n.lat), nx = -track.ty[n.idx] * sgn, ny = track.tx[n.idx] * sgn;
+    const vn = this.vx * nx + this.vy * ny; if (vn <= 0) return; // already heading back in
+    const k = clamp((a - edge) / (lim - edge), 0, 1) * 0.7 + 0.3;
+    let ta = track.ang[n.idx]; const va = Math.atan2(this.vy, this.vx);
+    if (Math.abs(wrapAng(ta - va)) > Math.PI / 2) ta += Math.PI;
+    const rot = clamp(wrapAng(ta - va), -1, 1) * clamp(dt * 4.5 * k, 0, 1), c = Math.cos(rot), s = Math.sin(rot);
+    const vx = this.vx * c - this.vy * s, vy = this.vx * s + this.vy * c; this.vx = vx; this.vy = vy;
+    this.th = wrapAng(this.th + rot);
+    const vn2 = this.vx * nx + this.vy * ny; if (vn2 > 0) { this.vx -= nx * vn2 * clamp(dt * 3 * k, 0, 1); this.vy -= ny * vn2 * clamp(dt * 3 * k, 0, 1); }
   }
   // walls + lap progress (shared by both driving models)
   collide(track, A) {
@@ -241,7 +258,11 @@ class CarSim {
       const sgn = Math.sign(n2.lat), nx = -track.ty[n2.idx] * sgn, ny = track.tx[n2.idx] * sgn; // outward normal
       const over = Math.abs(n2.lat) - lim; this.x -= nx * over; this.y -= ny * over;
       const vn = this.vx * nx + this.vy * ny;
-      if (vn > 0) { const sw = A.wall; this.vx -= (sw ? 1.05 : 1.2) * vn * nx; this.vy -= (sw ? 1.05 : 1.2) * vn * ny; this.vx *= sw ? 0.97 : 0.9; this.vy *= sw ? 0.97 : 0.9; this.w *= sw ? 0.75 : 0.5; this.wallHit = Math.max(this.wallHit, sw ? vn * 0.4 : vn);
+      if (vn > 0 && A.arc) { // easy handling: slide along the wall keeping your speed, barely a scratch
+        this.vx -= vn * nx; this.vy -= vn * ny; this.vx *= 0.99; this.vy *= 0.99; this.w *= 0.7; this.wallHit = Math.max(this.wallHit, vn * 0.2);
+        let ta = track.ang[n2.idx]; if (Math.abs(wrapAng(ta - this.th)) > Math.PI / 2) ta += Math.PI;
+        this.th = wrapAng(this.th + wrapAng(ta - this.th) * 0.5);
+      } else if (vn > 0) { const sw = A.wall; this.vx -= (sw ? 1.05 : 1.2) * vn * nx; this.vy -= (sw ? 1.05 : 1.2) * vn * ny; this.vx *= sw ? 0.97 : 0.9; this.vy *= sw ? 0.97 : 0.9; this.w *= sw ? 0.75 : 0.5; this.wallHit = Math.max(this.wallHit, sw ? vn * 0.4 : vn);
         // glance off: nudge the nose toward the barrier's direction so you don't stay pinned
         let ta = track.ang[n2.idx]; if (Math.abs(wrapAng(ta - this.th)) > Math.PI / 2) ta += Math.PI;
         this.th = wrapAng(this.th + wrapAng(ta - this.th) * 0.4); }

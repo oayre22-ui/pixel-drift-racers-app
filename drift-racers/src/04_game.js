@@ -10,9 +10,26 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR' && Game.session && Game.session.player && !Game.paused) Game.session.resetPlayer();
 });
 addEventListener('keyup', e => { Keys[e.code] = false; });
-addEventListener('blur', () => { for (const k in Keys) Keys[k] = false; });
+// on-screen buttons: touch identifier / pointer id -> button key
+const TouchFingers = new Map(), TouchPointers = new Map();
+function updTouch() {
+  const held = new Set([...TouchFingers.values(), ...TouchPointers.values()]);
+  for (const k in TouchState) {
+    TouchState[k] = held.has(k) ? 1 : 0;
+    const el = document.getElementById('tb_' + k); if (el) el.classList.toggle('on', held.has(k));
+  }
+}
+function releaseTouch() { TouchFingers.clear(); TouchPointers.clear(); updTouch(); }
+function releaseAll() { for (const k in Keys) Keys[k] = false; releaseTouch(); }
+addEventListener('blur', releaseAll);
+addEventListener('pagehide', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 addEventListener('pointerdown', () => Sfx.init(), {passive: true});
 addEventListener('touchstart', () => { if (!usingTouch) { usingTouch = true; UI.refreshTouch(); } }, {passive: true});
+// iOS: stop pinch / double-tap zoom and the long-press magnifier during play
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), {passive: false});
+document.addEventListener('dblclick', e => e.preventDefault(), {passive: false});
+document.getElementById('game').addEventListener('touchstart', e => e.preventDefault(), {passive: false});
 
 function readGamepad() {
   try {

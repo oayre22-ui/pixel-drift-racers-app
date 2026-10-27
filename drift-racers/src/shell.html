@@ -13,7 +13,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
-  font-family:"Courier New",Courier,monospace;font-weight:bold;-webkit-user-select:none;user-select:none;touch-action:none}
+  font-family:"Courier New",Courier,monospace;font-weight:bold;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
 #game{position:fixed;left:0;top:0;image-rendering:pixelated;image-rendering:crisp-edges;display:block}
 #ui{position:fixed;inset:0;overflow:hidden;pointer-events:none}
 #ui>*{pointer-events:auto}
@@ -138,7 +138,9 @@ button.sel{border-color:var(--gold);background:#3a3070}
 #touch{position:fixed;inset:0;pointer-events:none;display:none}
 #touch.show{display:block}
 #touch .tb{position:absolute;pointer-events:auto;background:rgba(36,31,74,.55);border:3px solid rgba(255,255,255,.35);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-size:15px;text-shadow:2px 2px 0 #000;touch-action:none;box-shadow:0 0 0 2px rgba(0,0,0,.5)}
+  display:flex;align-items:center;justify-content:center;font-size:15px;text-shadow:2px 2px 0 #000;touch-action:none;box-shadow:0 0 0 2px rgba(0,0,0,.5);
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#game,#touch{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 #touch .tb.on{background:rgba(255,61,127,.6);border-color:#fff}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--panel2);border:3px solid var(--gold);padding:8px 14px;z-index:20;pointer-events:none;box-shadow:0 0 0 2px #000}
 .portrait-hint{display:none;color:var(--gold);font-size:12px;margin-top:8px}

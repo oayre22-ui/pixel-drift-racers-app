@@ -512,9 +512,13 @@ const UI = {
       ${tg('kick', true, false, 'Auto Drift Start', 'Steer hard on the gas at speed and the back kicks out, no handbrake needed.')}
       ${tg('speedHold', true, false, 'Speed Hold', 'Keeps your speed up through long drifts.')}
       ${tg('softWalls', true, false, 'Soft Walls', 'Bounce gently off walls without losing much speed or your combo.')}
+      ${tg('easyHandling', true, false, 'Easy Handling', 'Arcade grip: the car steers itself away from walls, won\'t snap-spin, and lifting off the gas straightens you out.')}
       ${tg('combo', true, false, 'Combo Saver', 'Longer time to link drifts, and gravel or light taps don\'t end your combo.')}
       ${ch('steerSpd', ['slow', 'normal', 'fast'], 'Steering Speed', 'How quickly the wheels turn when you steer.')}
       ${tg('sound', true, false, 'Sound', 'Engine, tyres and menu sounds.')}
+      <div class="item"><div class="nm">Music<small>Menu and race music volume.</small></div>${Object.keys(MUSIC_LEVELS).map(v => `<button class="${(s.music || 'normal') === v ? 'sel' : ''}" data-a="set" data-k="music" data-v="${v}">${v}</button>`).join('')}</div>
+      <div class="card"><h3>Race Music</h3><div class="meta">Shuffle plays a different track each race. Tap a track to hear it.</div>
+        <div class="row" style="margin-top:8px;flex-wrap:wrap">${[['mix', 'Shuffle'], ...RACE_TRACKS.map(k => [k, MUSIC_TRACKS[k].name])].map(([k, n]) => `<button class="${(s.raceMusic || 'mix') === k ? 'sel' : ''}" data-a="set" data-k="raceMusic" data-v="${k}">${n}</button>`).join('')}</div></div>
       ${tg('units', 'kmh', 'mph', 'Speed Units', '')}
       <div class="item"><div class="nm">Touch Controls<small>Auto shows them when you touch the screen.</small></div>${['auto', 'on', 'off'].map(v => `<button class="${s.touch === v ? 'sel' : ''}" data-a="set" data-k="touch" data-v="${v}">${v}</button>`).join('')}</div>
       <div class="card"><h3>Controls</h3><div class="meta">
@@ -678,17 +682,36 @@ const UI = {
     $touch.classList.toggle('show', !!show); Game.touchUI = !!show;
     const hud = document.getElementById('hud'); if (hud) hud.classList.toggle('touchmode', !!show);
     const nos = document.getElementById('tb_nos'); if (nos && s && s.player) nos.style.display = s.player.spec.nos ? '' : 'none';
+
+    if (!show) releaseTouch();
   },
   buildTouch() {
     const B = [['left', '&#9664;', 'left:2vmin;bottom:5vmin;width:19vmin;height:24vmin'], ['right', '&#9654;', 'left:23vmin;bottom:5vmin;width:19vmin;height:24vmin'],
       ['gas', 'GAS', 'right:2vmin;bottom:5vmin;width:17vmin;height:34vmin'], ['brake', 'BRAKE', 'right:21vmin;bottom:5vmin;width:17vmin;height:15vmin'],
       ['hand', 'E-BRAKE', 'right:21vmin;bottom:23vmin;width:17vmin;height:16vmin;font-size:12px'], ['nos', 'NOS', 'right:2vmin;bottom:42vmin;width:17vmin;height:11vmin']];
     $touch.innerHTML = B.map(b => `<div class="tb" id="tb_${b[0]}" data-k="${b[0]}" style="${b[2]}">${b[1]}</div>`).join('');
-    for (const el of $touch.querySelectorAll('.tb')) {
-      const k = el.dataset.k, ids = new Set();
-      const upd = () => { TouchState[k] = ids.size ? 1 : 0; el.classList.toggle('on', ids.size > 0); };
-      el.addEventListener('pointerdown', e => { e.preventDefault(); ids.add(e.pointerId); try { el.setPointerCapture(e.pointerId); } catch (x) {} upd(); });
-      const off = e => { ids.delete(e.pointerId); upd(); };
+    // fingers: every touch event rebuilds the held set from e.touches, so a lost touchend can't leave a button stuck
+    const btns = [...$touch.querySelectorAll('.tb')], hit = (x, y) => {
+      for (const el of btns) { if (el.style.display === 'none') continue; const r = el.getBoundingClientRect(); if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return el.dataset.k; }
+      return null;
+    };
+    const sync = e => {
+      e.preventDefault();
+      const live = new Set();
+      for (const t of e.touches) {
+        live.add(t.identifier);
+        const k = hit(t.clientX, t.clientY);
+        if (k) TouchFingers.set(t.identifier, k);
+      }
+      for (const id of [...TouchFingers.keys()]) if (!live.has(id)) TouchFingers.delete(id);
+      updTouch();
+    };
+    for (const ev of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) $touch.addEventListener(ev, sync, {passive: false});
+    // mouse/pen (touch buttons forced on in Settings)
+    for (const el of btns) {
+      const k = el.dataset.k;
+      el.addEventListener('pointerdown', e => { if (e.pointerType === 'touch') return; e.preventDefault(); TouchPointers.set(e.pointerId, k); try { el.setPointerCapture(e.pointerId); } catch (x) {} updTouch(); });
+      const off = e => { if (TouchPointers.delete(e.pointerId)) updTouch(); };
       el.addEventListener('pointerup', off); el.addEventListener('pointercancel', off); el.addEventListener('lostpointercapture', off);
       el.addEventListener('contextmenu', e => e.preventDefault());
     }
@@ -773,7 +796,7 @@ const UI = {
       case 'buycar': { const c = CAR_BY_ID[ds.id]; if (SAVE.cash < c.price || SAVE.cars[c.id]) return;
         SAVE.cash -= c.price; SAVE.cars[c.id] = newCarState(c.id); SAVE.current = c.id; persist(); Sfx.cash(); this.toast(c.name + ' is in your garage'); this.dealer(); break; }
       case 'apreset': Object.assign(SAVE.settings, ASSIST_PRESETS[ds.k]); persist(); Sfx.beep(700, 0.06); this.toast('Assists set to ' + {easy: 'Max Easy', normal: 'Default', pro: 'Pro'}[ds.k]); this.settings(); break;
-      case 'set': { let v = ds.v; if (v === 'true') v = true; if (v === 'false') v = false; SAVE.settings[ds.k] = v; persist(); if (ds.k === 'sound') Sfx.setOn(v); this.settings(); break; }
+      case 'set': { let v = ds.v; if (v === 'true') v = true; if (v === 'false') v = false; SAVE.settings[ds.k] = v; persist(); if (ds.k === 'sound') Sfx.setOn(v); if (ds.k === 'raceMusic') Music.preview = MUSIC_TRACKS[v] ? v : null; this.settings(); break; }
       case 'iapbuy': IAP.buy(ds.id); break;
       case 'redeem': { if (STORE_BUILD) return; const inp = document.getElementById('codein'), code = (inp && inp.value || '').trim().toLowerCase(), r = CODES[code];
         if (!r) { this.toast(code ? 'Invalid code' : 'Type a code first'); Sfx.beep(220, 0.08); return; }
